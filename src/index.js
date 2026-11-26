@@ -112,7 +112,7 @@ button{cursor:pointer}
   </section>
   <div id="messages" hidden></div>
   <div class="composerwrap">
-   <form class="composer" id="chatForm" onsubmit="return false;">
+   <div class="composer" id="chatComposer">
     <textarea id="prompt" placeholder="Message Cold AI..." rows="1" required></textarea>
     <div class="composerbar">
      <button class="toolbtn" type="button" id="attach" title="Attach a text file">＋</button>
@@ -121,7 +121,7 @@ button{cursor:pointer}
      <span class="spacer"></span>
      <button class="send" id="send" type="button">Send ↑</button>
     </div>
-   </form>
+   </div>
    <div class="footnote">AI can make mistakes. Review generated files before using them on a live server.</div>
   </div>
  </main>
@@ -185,6 +185,7 @@ $('fileInput').onchange=async e=>{
 };
 promptBox.addEventListener('input',()=>{promptBox.style.height='auto';promptBox.style.height=Math.min(promptBox.scrollHeight,180)+'px';saveLocal();});
 async function sendMessage(){
+ if($("send").disabled)return;
  const text=promptBox.value.trim();if(!text)return;
  welcome.hidden=true;messages.hidden=false;
  const userText=text+(attachments.length?'\n\nAttached files: '+attachments.map(f=>f.name).join(', '):'');
