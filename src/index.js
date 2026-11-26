@@ -131,7 +131,8 @@ button{cursor:pointer}
 const $=id=>document.getElementById(id);
 const promptBox=$('prompt'),messages=$('messages'),welcome=$('welcome'),historyBox=$('history');
 let mode='assistant',chats=[],current=[],currentChatId=null;
-async function api(path,options={}){const r=await fetch(path,{credentials:'same-origin',...options});const d=await r.json().catch(()=>({error:'Invalid server response'}));if(!r.ok)throw new Error(d.error||'Request failed');return d;}\nasync function loadCloudChats(){try{const d=await api('/api/chats');chats=d.chats||[];renderHistory();}catch(e){console.warn('Cloud chat history unavailable:',e.message);}}
+async function api(path,options={}){const r=await fetch(path,{credentials:'same-origin',...options});const d=await r.json().catch(()=>({error:'Invalid server response'}));if(!r.ok)throw new Error(d.error||'Request failed');return d;}
+async function loadCloudChats(){try{const d=await api('/api/chats');chats=d.chats||[];renderHistory();}catch(e){console.warn('Cloud chat history unavailable:',e.message);}}
 const modeNames={assistant:'AI Assistant',plugin:'Minecraft Plugin Builder',menus:'DeluxeMenus Builder',config:'Config Generator',software:'Software Builder'};
 const modeHints={assistant:'Ask anything · Enter to send',plugin:'Describe the plugin and target server version',menus:'Describe menu items, lore, prices and commands',config:'Name the plugin and configuration format',software:'Describe the software and desired output'};
 let attachments=[];
