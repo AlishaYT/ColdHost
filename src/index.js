@@ -130,7 +130,7 @@ button{cursor:pointer}
 <script>
 const $=id=>document.getElementById(id);
 const promptBox=$('prompt'),messages=$('messages'),welcome=$('welcome'),historyBox=$('history');
-let mode='assistant',chats=[],current=[];
+let mode='assistant',chats=[],current=[],currentChatId=null;\nasync function api(path,options={}){const r=await fetch(path,{credentials:'same-origin',...options});const d=await r.json().catch(()=>({error:'Invalid server response'}));if(!r.ok)throw new Error(d.error||'Request failed');return d;}\nasync function loadCloudChats(){try{const d=await api('/api/chats');chats=d.chats||[];renderHistory();}catch(e){console.warn('Cloud chat history unavailable:',e.message);}}
 const modeNames={assistant:'AI Assistant',plugin:'Minecraft Plugin Builder',menus:'DeluxeMenus Builder',config:'Config Generator',software:'Software Builder'};
 const modeHints={assistant:'Ask anything · Enter to send',plugin:'Describe the plugin and target server version',menus:'Describe menu items, lore, prices and commands',config:'Name the plugin and configuration format',software:'Describe the software and desired output'};
 let attachments=[];
@@ -144,7 +144,7 @@ document.querySelectorAll('.navitem').forEach(b=>b.addEventListener('click',()=>
 $('mobileMenu').onclick=()=>$('sidebar').classList.toggle('open');
 function renderHistory(){
  historyBox.innerHTML='';
- chats.slice(-20).reverse().forEach((c,i)=>{const b=document.createElement('button');b.textContent=c.title||'New chat';b.onclick=()=>{current=c.messages;renderMessages();};historyBox.appendChild(b);});
+ chats.slice(0,30).forEach(c=>{const b=document.createElement('button');b.textContent=c.title||'New chat';b.onclick=async()=>{try{const d=await api('/api/chats/'+encodeURIComponent(c.id));currentChatId=c.id;current=(d.messages||[]).map(m=>({role:m.role,content:m.content}));setMode(d.chat?.mode||c.mode||'assistant');renderMessages();}catch(e){alert('Could not load chat: '+e.message);}};historyBox.appendChild(b);});
 }
 function persistChat(){
  if(!current.length)return;
@@ -190,7 +190,7 @@ $('chatForm').onsubmit=async e=>{
  try{
   const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,mode,attachments})});
   const data=await response.json();if(!response.ok)throw new Error(data.error||'Request failed');
-  thinking.textContent=data.reply||'No response received.';current.push({role:'assistant',content:thinking.textContent});persistChat();
+  thinking.textContent=data.reply||'No response received.';current.push({role:'assistant',content:thinking.textContent});try{await saveCloudChat(userText,thinking.textContent);}catch(saveError){thinking.textContent+='\\n\\n(Note: this reply was generated, but cloud saving failed: '+saveError.message+')';}
  }catch(err){thinking.textContent='Error: '+err.message;}
  finally{$('send').disabled=false;attachments=[];$('fileInput').value='';$('modeHint').textContent=modeHints[mode];messages.scrollTop=messages.scrollHeight;}
 };
@@ -216,11 +216,84 @@ export default {
       return new Response(PAGE, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
     }
 
+    const cookieHeader = request.headers.get("Cookie") || "";
+    const sessionCookie = cookieHeader.split(";").map(v => v.trim()).find(v => v.startsWith("coldai_session="));
+    const sessionToken = sessionCookie ? decodeURIComponent(sessionCookie.slice("coldai_session=".length)) : null;
+    const sessionRow = sessionToken ? await env.DB.prepare(
+      "SELECT user_id FROM sessions WHERE id = ? AND expires_at > datetime('now')"
+    ).bind(sessionToken).first() : null;
+    const currentUserId = sessionRow?.user_id || null;
+
+    if (request.method === "GET" && url.pathname === "/api/session") {
+      if (currentUserId) return Response.json({ authenticated: false, userId: currentUserId, accountType: "guest" });
+      const userId = crypto.randomUUID();
+      const token = crypto.randomUUID() + crypto.randomUUID();
+      await env.DB.prepare("INSERT INTO users (id, display_name) VALUES (?, ?)")
+        .bind(userId, "Guest").run();
+      await env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, datetime('now', '+30 days'))")
+        .bind(token, userId).run();
+      return Response.json(
+        { authenticated: false, userId, accountType: "guest" },
+        { headers: { "Set-Cookie": "coldai_session=" + encodeURIComponent(token) + "; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000" } }
+      );
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/chats") {
+      if (!currentUserId) return Response.json({ error: "Session missing. Reload the page." }, { status: 401 });
+      const result = await env.DB.prepare(
+        "SELECT id, title, mode, updated_at FROM chats WHERE user_id = ? ORDER BY updated_at DESC LIMIT 50"
+      ).bind(currentUserId).all();
+      return Response.json({ chats: result.results || [] });
+    }
+
+    if (request.method === "GET" && url.pathname.startsWith("/api/chats/")) {
+      if (!currentUserId) return Response.json({ error: "Session missing. Reload the page." }, { status: 401 });
+      const chatId = decodeURIComponent(url.pathname.slice("/api/chats/".length));
+      const chat = await env.DB.prepare("SELECT id, title, mode FROM chats WHERE id = ? AND user_id = ?")
+        .bind(chatId, currentUserId).first();
+      if (!chat) return Response.json({ error: "Chat not found." }, { status: 404 });
+      const rows = await env.DB.prepare(
+        "SELECT role, content, created_at FROM messages WHERE chat_id = ? AND user_id = ? ORDER BY created_at ASC"
+      ).bind(chatId, currentUserId).all();
+      return Response.json({ chat, messages: rows.results || [] });
+    }
+
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ name: "Cold AI", status: "online", version: "0.2.0" });
     }
 
     if (request.method === "POST" && url.pathname === "/api/chat") {
+      if (!currentUserId) return Response.json({ error: "Session missing. Reload the page." }, { status: 401 });
+      try {
+        const body = await request.json();
+        const message = String(body.message || "").trim();
+        const reply = String(body.reply || "");
+        const mode = ["assistant","plugin","menus","config","software"].includes(body.mode) ? body.mode : "assistant";
+        let chatId = String(body.chatId || "");
+        if (!message || !reply) return Response.json({ error: "Message and reply are required to save." }, { status: 400 });
+        let chat = chatId ? await env.DB.prepare("SELECT id FROM chats WHERE id = ? AND user_id = ?").bind(chatId,currentUserId).first() : null;
+        if (!chat) {
+          chatId = crypto.randomUUID();
+          await env.DB.prepare("INSERT INTO chats (id,user_id,title,mode) VALUES (?,?,?,?)")
+            .bind(chatId,currentUserId,message.slice(0,70) || "New Chat",mode).run();
+        } else {
+          await env.DB.prepare("UPDATE chats SET updated_at = CURRENT_TIMESTAMP, mode = ? WHERE id = ? AND user_id = ?")
+            .bind(mode,chatId,currentUserId).run();
+        }
+        await env.DB.batch([
+          env.DB.prepare("INSERT INTO messages (id,chat_id,user_id,role,content) VALUES (?,?,?,?,?)")
+            .bind(crypto.randomUUID(),chatId,currentUserId,"user",message),
+          env.DB.prepare("INSERT INTO messages (id,chat_id,user_id,role,content) VALUES (?,?,?,?,?)")
+            .bind(crypto.randomUUID(),chatId,currentUserId,"assistant",reply)
+        ]);
+        return Response.json({ saved: true, chatId });
+      } catch (error) {
+        console.error("D1 chat save error:", error);
+        return Response.json({ error: "Could not save chat: " + error.message }, { status: 500 });
+      }
+    }
+
+
       try {
         const body = await request.json();
         const message = String(body.message || "").trim();
