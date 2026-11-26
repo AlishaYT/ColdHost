@@ -56,3 +56,70 @@
   .main.drag-active::after{inset:5px}
   .drop-card{padding:24px 20px}
 }
+
+
+/* Automatic plugin JAR build controls */
+.composer-actions{
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+.build-button{
+  height:34px;
+  padding:0 12px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:7px;
+  border:1px solid #426a86;
+  border-radius:10px;
+  background:#172c40;
+  color:#bdeaff;
+  font:600 11px 'DM Sans';
+  cursor:pointer;
+  white-space:nowrap;
+}
+.build-button:hover:not(:disabled){
+  background:#20435d;
+  border-color:#75bfe3;
+}
+.build-button:disabled{
+  opacity:.35;
+  cursor:not-allowed;
+}
+.jar-download{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  margin-top:14px;
+  padding:10px 14px;
+  border-radius:10px;
+  background:#a9e2fa;
+  color:#102538;
+  text-decoration:none;
+  font:700 12px 'DM Sans';
+}
+.jar-download:hover{background:#c6efff}
+.build-logs{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  margin:14px 0 0 10px;
+  color:#91cfee;
+  font:600 11px 'DM Sans';
+  text-decoration:none;
+}
+.build-logs:hover{text-decoration:underline}
+.light .build-button{
+  background:#e2f2fc;
+  border-color:#a8cfe2;
+  color:#1e4b67;
+}
+.light .build-button:hover:not(:disabled){background:#cfe9f8}
+.light .build-logs{color:#327da7}
+@media(max-width:700px){
+  .composer-actions{gap:6px}
+  .build-button{padding:0 9px;font-size:10px}
+  .composer-tools>div:first-child{min-width:0}
+  .hint{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+}
