@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { Plus, PanelLeftClose, PanelLeftOpen, Send, Paperclip, Square, Copy, Trash2, Sun, Moon, Sparkles, Bot, User, X, FileText } from "lucide-react";
+import { Plus, PanelLeftClose, PanelLeftOpen, Send, Paperclip, Square, Copy, Trash2, Sun, Moon, Sparkles, Bot, User, X, FileText, Hammer, Download, ExternalLink } from "lucide-react";
 
-type Message = { id: string; role: "user" | "assistant"; content: string };
+type Message = { id: string; role: "user" | "assistant"; content: string; downloadUrl?: string; runUrl?: string };
 type Chat = { id: string; title: string; messages: Message[]; updatedAt: number };
 type Attachment = { id: string; name: string; type: string; text?: string; preview?: string };
 
@@ -20,6 +20,7 @@ const ACCEPTED_FILES = [
 ].join(",");
 const uid = () => crypto.randomUUID();
 const titleFrom = (s: string) => s.trim().slice(0, 42) || "New chat";
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -49,7 +50,11 @@ export default function App() {
 
   useEffect(() => { localStorage.setItem(STORE, JSON.stringify(chats)); }, [chats]);
   useEffect(() => { if (activeId) localStorage.setItem("coldai_active_v1", activeId); else localStorage.removeItem("coldai_active_v1"); }, [activeId]);
-  useEffect(() => { fetch("/api/health").then(r => r.ok ? r.json() : Promise.reject()).then(() => setApiStatus("AI ready")).catch(() => setApiStatus("AI unavailable")); }, []);
+  useEffect(() => {
+    fetch("/api/health").then(r => r.ok ? r.json() : Promise.reject())
+      .then(data => setApiStatus(data.jarBuilderAvailable ? "AI + JAR builder ready" : "AI ready · JAR builder setup needed"))
+      .catch(() => setApiStatus("AI unavailable"));
+  }, []);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [active?.messages, busy]);
 
   function newChat() {
@@ -61,6 +66,14 @@ export default function App() {
 
   function updateChat(id: string, fn: (c: Chat) => Chat) {
     setChats(prev => prev.map(c => c.id === id ? fn(c) : c).sort((a,b) => b.updatedAt-a.updatedAt));
+  }
+
+  function updateMessage(chatId: string, messageId: string, patch: Partial<Message>) {
+    updateChat(chatId, c => ({
+      ...c,
+      messages: c.messages.map(m => m.id === messageId ? { ...m, ...patch } : m),
+      updatedAt: Date.now(),
+    }));
   }
 
   function deleteChat(id: string) {
@@ -191,6 +204,101 @@ export default function App() {
     }
   }
 
+  async function buildJar() {
+    const prompt = draft.trim() || (attachments.length ? "Build a Minecraft plugin project using the attached source files where applicable." : "");
+    if (!prompt || busy) return;
+
+    const chatId = activeId || uid();
+    let chat = chats.find(c => c.id === chatId);
+    if (!chat) {
+      chat = { id: chatId, title: titleFrom(prompt), messages: [], updatedAt: Date.now() };
+      setChats(prev => [chat!, ...prev]); setActiveId(chatId);
+    }
+
+    const files = attachments;
+    const userMsg: Message = {
+      id: uid(),
+      role: "user",
+      content: prompt + (files.length ? "\n\n" + files.map(a => "[Attached: " + a.name + "]").join("\n") : ""),
+    };
+    const assistantId = uid();
+    updateChat(chatId, c => ({
+      ...c,
+      title: c.messages.length ? c.title : titleFrom(prompt),
+      messages: [...c.messages, userMsg, { id: assistantId, role: "assistant", content: "❄ Preparing the Maven project with Cold AI…" }],
+      updatedAt: Date.now(),
+    }));
+
+    setDraft("");
+    setAttachments([]);
+    setBusy(true);
+    setError("");
+
+    try {
+      const start = await fetch("/api/plugin/build", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt,
+          attachments: files.map(f => ({ name: f.name, type: f.type, text: f.text })),
+        }),
+      });
+      const started = await start.json().catch(() => ({}));
+      if (!start.ok) throw new Error(started.error || "Could not start the JAR build.");
+      const buildId = String(started.buildId || "");
+      if (!buildId) throw new Error("The build service did not return a build ID.");
+
+      updateMessage(chatId, assistantId, {
+        content: "✅ Maven project generated for " + String(started.pluginName || "your plugin") + ".\n" +
+          String(started.summary || "") + "\n\n⏳ GitHub's private Java builder is compiling the JAR…",
+        runUrl: started.runUrl,
+      });
+
+      for (let attempt = 0; attempt < 150; attempt++) {
+        await wait(4000);
+        const statusResponse = await fetch("/api/plugin/status?id=" + encodeURIComponent(buildId), { cache: "no-store" });
+        const status = await statusResponse.json().catch(() => ({}));
+
+        if (!statusResponse.ok) throw new Error(status.error || "Could not read plugin build status.");
+        if (status.status === "success") {
+          updateMessage(chatId, assistantId, {
+            content: "✅ **Build successful!**\n" + String(started.pluginName || "Your plugin") + " compiled into a real Minecraft .jar file.\n\n" + String(started.summary || ""),
+            downloadUrl: String(status.downloadUrl || ""),
+            runUrl: String(status.runUrl || started.runUrl || ""),
+          });
+          return;
+        }
+        if (status.status === "failure") {
+          updateMessage(chatId, assistantId, {
+            content: "❌ Plugin compilation failed.\n" + String(status.message || "Open the build logs to inspect the Maven error."),
+            runUrl: String(status.runUrl || started.runUrl || ""),
+          });
+          return;
+        }
+
+        if (attempt % 3 === 2) {
+          updateMessage(chatId, assistantId, {
+            content: "✅ Maven project generated for " + String(started.pluginName || "your plugin") + ".\n" +
+              String(started.summary || "") + "\n\n⏳ Build status: " + String(status.status || "queued") + ". Compiling with Maven and Java 21…",
+            runUrl: String(status.runUrl || started.runUrl || ""),
+          });
+        }
+      }
+
+      updateMessage(chatId, assistantId, {
+        content: "The plugin build is still running. Open the build run to check its progress, then try the build status again.",
+        runUrl: String(started.runUrl || "https://github.com/AlishaYT/ColdAI-Builder/actions"),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown build error";
+      setError(msg);
+      updateMessage(chatId, assistantId, { content: "I couldn't build the JAR. " + msg });
+    } finally {
+      setBusy(false);
+      inputRef.current?.focus();
+    }
+  }
+
   async function copy(text: string) {
     try { await navigator.clipboard.writeText(text); }
     catch { setError("Clipboard access was blocked by the browser."); }
@@ -219,7 +327,7 @@ export default function App() {
       <header className="topbar"><div className="top-left"><span className="mobile-brand">❄ Cold AI</span><span className="model-label"><Sparkles size={14}/> Cold AI <span className="model-sub">· Minecraft & Software Assistant</span></span></div><div className="top-right"><span className="status top-status"><i/> {apiStatus}</span></div></header>
       <section className="conversation">
         {!active || active.messages.length===0 ? <div className="welcome"><div className="welcome-icon"><span>❄</span></div><h1>What are we building today?</h1><p>Your AI partner for Minecraft development, debugging and software engineering.</p><div className="suggestions">{starter.map(s=><button type="button" key={s} onClick={()=>setDraft(s)}>{s}<span>↗</span></button>)}</div></div> :
-          <div className="messages">{active.messages.map(m=><article className={"message "+m.role} key={m.id}><div className="message-avatar">{m.role==="assistant"?<Bot size={18}/>:<User size={18}/>}</div><div className="message-body"><div className="message-role">{m.role==="assistant"?"Cold AI":"You"}</div><pre>{m.content}</pre>{m.role==="assistant"&&<div className="message-actions"><button type="button" onClick={()=>copy(m.content)}><Copy size={14}/> Copy</button></div>}</div></article>)}{busy&&<div className="message assistant"><div className="message-avatar"><Bot size={18}/></div><div className="message-body"><div className="message-role">Cold AI</div><div className="typing"><i/><i/><i/> Thinking…</div></div></div>}<div ref={bottomRef}/></div>}
+          <div className="messages">{active.messages.map(m=><article className={"message "+m.role} key={m.id}><div className="message-avatar">{m.role==="assistant"?<Bot size={18}/>:<User size={18}/>}</div><div className="message-body"><div className="message-role">{m.role==="assistant"?"Cold AI":"You"}</div><pre>{m.content}</pre>{m.downloadUrl&&<a className="jar-download" href={m.downloadUrl}><Download size={15}/> Download .jar</a>}{m.runUrl&&<a className="build-logs" href={m.runUrl} target="_blank" rel="noreferrer"><ExternalLink size={13}/> Build logs</a>}{m.role==="assistant"&&<div className="message-actions"><button type="button" onClick={()=>copy(m.content)}><Copy size={14}/> Copy</button></div>}</div></article>)}{busy&&<div className="message assistant"><div className="message-avatar"><Bot size={18}/></div><div className="message-body"><div className="message-role">Cold AI</div><div className="typing"><i/><i/><i/> Working…</div></div></div>}<div ref={bottomRef}/></div>}
       </section>
       <footer className="composer-wrap">
         {error&&<div className="error-banner" role="alert">{error}<button type="button" onClick={()=>setError("")}><X size={14}/></button></div>}
@@ -232,9 +340,12 @@ export default function App() {
           <div className="composer-tools">
             <div>
               <button type="button" className="tool-button" onClick={()=>fileRef.current?.click()} disabled={busy} title="Attach files" aria-label="Attach files"><Paperclip size={18}/></button>
-              <span className="hint">Attach files or drag and drop · Enter to send</span>
+              <span className="hint">Attach or drop files · Enter to send</span>
             </div>
-            <div><button type="button" className="send-button" onClick={()=>void send()} disabled={busy||(!draft.trim()&&!attachments.length)} title="Send message">{busy?<Square size={15}/>:<Send size={16}/>}</button></div>
+            <div className="composer-actions">
+              <button type="button" className="build-button" onClick={()=>void buildJar()} disabled={busy||(!draft.trim()&&!attachments.length)} title="Generate, compile and download a Minecraft plugin JAR"><Hammer size={15}/> Build JAR</button>
+              <button type="button" className="send-button" onClick={()=>void send()} disabled={busy||(!draft.trim()&&!attachments.length)} title="Send message">{busy?<Square size={15}/>:<Send size={16}/>}</button>
+            </div>
           </div>
           <input ref={fileRef} className="file-picker" type="file" multiple accept={ACCEPTED_FILES}
             onChange={e=>{ void addFiles(Array.from(e.currentTarget.files || [])); }} aria-label="Choose files"/>
