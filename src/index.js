@@ -146,13 +146,11 @@ function renderHistory(){
  historyBox.innerHTML='';
  chats.slice(0,30).forEach(c=>{const b=document.createElement('button');b.textContent=c.title||'New chat';b.onclick=async()=>{try{const d=await api('/api/chats/'+encodeURIComponent(c.id));currentChatId=c.id;current=(d.messages||[]).map(m=>({role:m.role,content:m.content}));setMode(d.chat?.mode||c.mode||'assistant');renderMessages();}catch(e){alert('Could not load chat: '+e.message);}};historyBox.appendChild(b);});
 }
-function persistChat(){
- if(!current.length)return;
- const title=(current.find(x=>x.role==='user')?.content||'New chat').slice(0,42);
- const existing=chats.findIndex(c=>c.messages===current);
- if(existing>=0)chats[existing]={title,messages:current};else chats.push({title,messages:current});
- try{localStorage.setItem('coldai_chats',JSON.stringify(chats.slice(-20)));}catch(e){}
- renderHistory();
+function persistChat(){renderHistory();}
+async function saveCloudChat(userText,assistantText){
+ const d=await api('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chatId:currentChatId,message:userText,reply:assistantText,mode})});
+ currentChatId=d.chatId;
+ await loadCloudChats();
 }
 function addMessage(role,text){
  const row=document.createElement('div');row.className='message '+(role==='user'?'user':'assistant');
@@ -166,7 +164,7 @@ function renderMessages(){
  current.forEach(m=>addMessage(m.role,m.content));
 }
 function newChat(){
- current=[];messages.innerHTML='';messages.hidden=true;welcome.hidden=false;promptBox.value='';attachments=[];renderHistory();
+ currentChatId=null;current=[];messages.innerHTML='';messages.hidden=true;welcome.hidden=false;promptBox.value='';attachments=[];renderHistory();
 }
 $('newChat').onclick=newChat;
 document.querySelectorAll('.suggestion').forEach(b=>b.onclick=()=>{promptBox.value=b.dataset.prompt;promptBox.focus();});
@@ -194,8 +192,8 @@ $('chatForm').onsubmit=async e=>{
  }catch(err){thinking.textContent='Error: '+err.message;}
  finally{$('send').disabled=false;attachments=[];$('fileInput').value='';$('modeHint').textContent=modeHints[mode];messages.scrollTop=messages.scrollHeight;}
 };
-try{chats=JSON.parse(localStorage.getItem('coldai_chats')||'[]');}catch(e){chats=[];}
-renderHistory();
+loadCloudChats();
+api('/api/session').then(()=>loadCloudChats()).catch(e=>console.warn('Session setup failed:',e.message));
 </script>
 </body>
 </html>`;
