@@ -188,7 +188,7 @@ $('chatForm').onsubmit=async e=>{
  addMessage('user',userText);current.push({role:'user',content:userText,mode});promptBox.value='';promptBox.style.height='auto';
  const thinking=addMessage('assistant','Cold AI is thinking…');$('send').disabled=true;
  try{
-  const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,mode,attachments})});
+  const response=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,mode,attachments})});
   const data=await response.json();if(!response.ok)throw new Error(data.error||'Request failed');
   thinking.textContent=data.reply||'No response received.';current.push({role:'assistant',content:thinking.textContent});try{await saveCloudChat(userText,thinking.textContent);}catch(saveError){thinking.textContent+='\\n\\n(Note: this reply was generated, but cloud saving failed: '+saveError.message+')';}
  }catch(err){thinking.textContent='Error: '+err.message;}
@@ -294,18 +294,17 @@ export default {
     }
 
 
+    if (request.method === "POST" && url.pathname === "/api/generate") {
       try {
         const body = await request.json();
         const message = String(body.message || "").trim();
         const mode = MODE_INSTRUCTIONS[body.mode] ? body.mode : "assistant";
         const attachments = Array.isArray(body.attachments) ? body.attachments.slice(0, 5) : [];
         if (!message) return Response.json({ error: "Please enter a message." }, { status: 400 });
-
         const attachmentText = attachments.map(file =>
           "\n\nFILE: " + String(file.name || "attachment").slice(0, 120) +
           "\n" + String(file.content || "").slice(0, 12000)
         ).join("");
-
         const result = await env.AI.run("@cf/google/gemma-4-26b-a4b-it", {
           messages: [
             { role: "system", content: MODE_INSTRUCTIONS[mode] },
@@ -314,15 +313,11 @@ export default {
           chat_template_kwargs: { enable_thinking: false },
           max_tokens: 1800
         });
-
         const reply = result?.response || result?.choices?.[0]?.message?.content;
-        if (!reply) {
-          console.log("Unexpected AI result:", JSON.stringify(result));
-          return Response.json({ error: "AI returned an empty response. Check Cloudflare logs." }, { status: 502 });
-        }
+        if (!reply) return Response.json({ error: "AI returned an empty response. Check Cloudflare logs." }, { status: 502 });
         return Response.json({ reply, mode });
       } catch (error) {
-        console.error("Cold AI error:", error);
+        console.error("Cold AI generation error:", error);
         return Response.json({ error: "AI request failed: " + error.message }, { status: 500 });
       }
     }
