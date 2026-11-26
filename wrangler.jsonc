@@ -1,0 +1,17 @@
+{
+  "$schema": "https://unpkg.com/wrangler@latest/config-schema.json",
+  "name": "cold-ai",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-11-26",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "ai": { "binding": "AI" },
+  "assets": { "directory": "./dist", "binding": "ASSETS", "not_found_handling": "single-page-application" },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "cold-ai-db",
+    "database_id": "c72ee493-bb14-48f9-997f-b00ce282dfaf",
+    "migrations_dir": "migrations"
+  }],
+  "observability": { "enabled": true }
+}
