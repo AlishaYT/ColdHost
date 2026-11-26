@@ -88,8 +88,13 @@ export default {
         }));
 
         const files = Array.isArray(body.attachments) ? body.attachments.slice(0, 5) : [];
-        const fileContext = files
-          .filter((file) => file.text)
+        const textFiles = files.filter((file) => typeof file.text === "string" && file.text.length > 0);
+        const imageFiles = files.filter(
+          (file) =>
+            typeof file.data === "string" &&
+            /^data:image\/(png|jpeg|webp);base64,/i.test(file.data),
+        );
+        const fileContext = textFiles
           .map(
             (file) =>
               "\n\n[Uploaded file: " +
@@ -99,8 +104,20 @@ export default {
           )
           .join("");
 
-        if (fileContext && messages.length) {
-          messages[messages.length - 1].content += fileContext;
+        if (messages.length) {
+          const lastMessage = messages[messages.length - 1];
+          if (imageFiles.length) {
+            const textContent = [lastMessage.content, fileContext].filter(Boolean).join("\n\n");
+            lastMessage.content = [
+              { type: "text", text: textContent || "Please inspect the attached image(s)." },
+              ...imageFiles.map((file) => ({
+                type: "image_url",
+                image_url: { url: file.data, detail: "auto" },
+              })),
+            ];
+          } else if (fileContext) {
+            lastMessage.content += fileContext;
+          }
         }
 
         const result = await env.AI.run(MODEL, {
