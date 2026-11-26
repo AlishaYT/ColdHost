@@ -20,6 +20,12 @@ textarea{flex:1;resize:vertical;min-height:55px;max-height:160px;background:#111
 button{background:#168bd0;color:white;border:0;border-radius:10px;padding:0 22px;font-weight:bold;cursor:pointer}
 button:disabled{opacity:.5}
 small{display:block;text-align:center;color:#91a4bd;margin-top:15px}
+@media(max-width:600px){
+ main{margin:15px auto;padding:10px}
+ #chat{height:60vh}
+ form{gap:6px}
+ button{padding:0 14px}
+}
 </style>
 </head>
 <body>
@@ -33,7 +39,7 @@ small{display:block;text-align:center;color:#91a4bd;margin-top:15px}
 </div>
 <form id="form">
 <textarea id="message" placeholder="Ask Cold AI anything..." required></textarea>
-<button id="send">Send</button>
+<button id="send" type="submit">Send</button>
 </form>
 <small>Cold AI • Powered by Cloudflare Workers AI</small>
 </main>
@@ -55,24 +61,33 @@ form.addEventListener('submit',async function(e){
  e.preventDefault();
  const message=input.value.trim();
  if(!message)return;
+
  addMessage(message,'user');
  input.value='';
  send.disabled=true;
- send.textContent='...';
+ send.textContent='Thinking...';
+
  try{
   const response=await fetch('/api/chat',{
    method:'POST',
    headers:{'Content-Type':'application/json'},
    body:JSON.stringify({message})
   });
+
   const data=await response.json();
-  if(!response.ok)throw new Error(data.error||'Request failed');
+
+  if(!response.ok){
+   throw new Error(data.error||'Request failed');
+  }
+
   addMessage(data.reply||'No response received.','ai');
+
  }catch(error){
   addMessage('Error: '+error.message,'ai');
+ }finally{
+  send.disabled=false;
+  send.textContent='Send';
  }
- send.disabled=false;
- send.textContent='Send';
 });
 </script>
 </body>
@@ -84,7 +99,9 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/") {
       return new Response(PAGE, {
-        headers: { "Content-Type": "text/html;charset=UTF-8" }
+        headers: {
+          "Content-Type": "text/html;charset=UTF-8"
+        }
       });
     }
 
@@ -119,15 +136,35 @@ export default {
                 role: "user",
                 content: message
               }
-            ]
+            ],
+            chat_template_kwargs: {
+              enable_thinking: false
+            },
+            max_tokens: 1024
           }
         );
 
-        return Response.json({
-          reply: result.response || "I could not generate a response."
-        });
+        const reply =
+          result?.response ||
+          result?.choices?.[0]?.message?.content;
+
+        if (!reply) {
+          console.log(
+            "Unexpected AI result:",
+            JSON.stringify(result)
+          );
+
+          return Response.json(
+            { error: "AI returned an empty response. Check Cloudflare logs." },
+            { status: 502 }
+          );
+        }
+
+        return Response.json({ reply });
 
       } catch (error) {
+        console.error("Cold AI error:", error);
+
         return Response.json(
           { error: "AI request failed: " + error.message },
           { status: 500 }
@@ -135,6 +172,9 @@ export default {
       }
     }
 
-    return Response.json({ error: "Not found" }, { status: 404 });
+    return Response.json(
+      { error: "Not found" },
+      { status: 404 }
+    );
   }
 };
