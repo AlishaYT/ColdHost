@@ -119,7 +119,7 @@ button{cursor:pointer}
      <input type="file" id="fileInput" hidden multiple>
      <span class="modehint" id="modeHint">Ask anything · Enter to send</span>
      <span class="spacer"></span>
-     <button class="send" id="send" type="submit">Send ↑</button>
+     <button class="send" id="send" type="button">Send ↑</button>
     </div>
    </form>
    <div class="footnote">AI can make mistakes. Review generated files before using them on a live server.</div>
@@ -136,8 +136,12 @@ async function loadCloudChats(){try{const d=await api('/api/chats');chats=d.chat
 const modeNames={assistant:'AI Assistant',plugin:'Minecraft Plugin Builder',menus:'DeluxeMenus Builder',config:'Config Generator',software:'Software Builder'};
 const modeHints={assistant:'Ask anything · Enter to send',plugin:'Describe the plugin and target server version',menus:'Describe menu items, lore, prices and commands',config:'Name the plugin and configuration format',software:'Describe the software and desired output'};
 let attachments=[];
+const LOCAL_KEY='coldai_autosave_v1';
+function saveLocal(){try{localStorage.setItem(LOCAL_KEY,JSON.stringify({mode,current,currentChatId,draft:promptBox.value,updatedAt:Date.now()}));}catch(e){console.warn('Local autosave failed:',e);}}
+function restoreLocal(){try{const saved=JSON.parse(localStorage.getItem(LOCAL_KEY)||'null');if(!saved)return;if(saved.mode&&modeNames[saved.mode])setMode(saved.mode);if(Array.isArray(saved.current)){current=saved.current.slice(-100);if(current.length)renderMessages();}currentChatId=saved.currentChatId||null;if(typeof saved.draft==='string')promptBox.value=saved.draft;}catch(e){console.warn('Could not restore autosave:',e);}}
+
 function setMode(next){
- mode=next;$('modePill').textContent=modeNames[mode];$('modeHint').textContent=modeHints[mode];
+ mode=next;$('modePill').textContent=modeNames[mode];$('modeHint').textContent=modeHints[mode];saveLocal();
  document.querySelectorAll('.navitem').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
  promptBox.placeholder=mode==='menus'?'Describe your DeluxeMenus layout...':mode==='plugin'?'Describe the Minecraft plugin you want...':'Message Cold AI...';
  $('sidebar').classList.remove('open');
@@ -146,7 +150,7 @@ document.querySelectorAll('.navitem').forEach(b=>b.addEventListener('click',()=>
 $('mobileMenu').onclick=()=>$('sidebar').classList.toggle('open');
 function renderHistory(){
  historyBox.innerHTML='';
- chats.slice(0,30).forEach(c=>{const b=document.createElement('button');b.textContent=c.title||'New chat';b.onclick=async()=>{try{const d=await api('/api/chats/'+encodeURIComponent(c.id));currentChatId=c.id;current=(d.messages||[]).map(m=>({role:m.role,content:m.content}));setMode(d.chat?.mode||c.mode||'assistant');renderMessages();}catch(e){alert('Could not load chat: '+e.message);}};historyBox.appendChild(b);});
+ chats.slice(0,30).forEach(c=>{const b=document.createElement('button');b.textContent=c.title||'New chat';b.onclick=async()=>{try{const d=await api('/api/chats/'+encodeURIComponent(c.id));currentChatId=c.id;current=(d.messages||[]).map(m=>({role:m.role,content:m.content}));setMode(d.chat?.mode||c.mode||'assistant');renderMessages();saveLocal();}catch(e){alert('Could not load chat: '+e.message);}};historyBox.appendChild(b);});
 }
 function persistChat(){renderHistory();}
 async function saveCloudChat(userText,assistantText){
@@ -166,7 +170,7 @@ function renderMessages(){
  current.forEach(m=>addMessage(m.role,m.content));
 }
 function newChat(){
- currentChatId=null;current=[];messages.innerHTML='';messages.hidden=true;welcome.hidden=false;promptBox.value='';attachments=[];renderHistory();
+ currentChatId=null;current=[];messages.innerHTML='';messages.hidden=true;welcome.hidden=false;promptBox.value='';attachments=[];renderHistory();saveLocal();
 }
 $('newChat').onclick=newChat;
 document.querySelectorAll('.suggestion').forEach(b=>b.onclick=()=>{promptBox.value=b.dataset.prompt;promptBox.focus();});
@@ -179,21 +183,23 @@ $('fileInput').onchange=async e=>{
  }
  $('modeHint').textContent=attachments.length?attachments.length+' file(s) attached':modeHints[mode];
 };
-promptBox.addEventListener('input',()=>{promptBox.style.height='auto';promptBox.style.height=Math.min(promptBox.scrollHeight,180)+'px';});
-promptBox.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('chatForm').requestSubmit();}});
-$('chatForm').addEventListener('submit',async e=>{
- e.preventDefault();const text=promptBox.value.trim();if(!text)return;
+promptBox.addEventListener('input',()=>{promptBox.style.height='auto';promptBox.style.height=Math.min(promptBox.scrollHeight,180)+'px';saveLocal();});
+async function sendMessage(){
+ const text=promptBox.value.trim();if(!text)return;
  welcome.hidden=true;messages.hidden=false;
  const userText=text+(attachments.length?'\n\nAttached files: '+attachments.map(f=>f.name).join(', '):'');
- addMessage('user',userText);current.push({role:'user',content:userText,mode});promptBox.value='';promptBox.style.height='auto';
+ addMessage('user',userText);current.push({role:'user',content:userText,mode});promptBox.value='';promptBox.style.height='auto';saveLocal();
  const thinking=addMessage('assistant','Cold AI is thinking…');$('send').disabled=true;
  try{
   const response=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text,mode,attachments})});
   const data=await response.json();if(!response.ok)throw new Error(data.error||'Request failed');
-  thinking.textContent=data.reply||'No response received.';current.push({role:'assistant',content:thinking.textContent});try{await saveCloudChat(userText,thinking.textContent);}catch(saveError){thinking.textContent+='\\n\\n(Note: this reply was generated, but cloud saving failed: '+saveError.message+')';}
+  thinking.textContent=data.reply||'No response received.';current.push({role:'assistant',content:thinking.textContent});saveLocal();try{await saveCloudChat(userText,thinking.textContent);}catch(saveError){thinking.textContent+='\\n\\n(Note: this reply was generated, but cloud saving failed: '+saveError.message+')';}
  }catch(err){thinking.textContent='Error: '+err.message;}
  finally{$('send').disabled=false;attachments=[];$('fileInput').value='';$('modeHint').textContent=modeHints[mode];messages.scrollTop=messages.scrollHeight;}
-});
+}
+$('send').addEventListener('click',sendMessage);
+promptBox.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
+restoreLocal();
 loadCloudChats();
 api('/api/session').then(()=>loadCloudChats()).catch(e=>console.warn('Session setup failed:',e.message));
 </script>
