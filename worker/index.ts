@@ -75,14 +75,14 @@ export default {
       try {
         const body = (await request.json()) as {
           messages?: Array<{ role: string; content: string }>;
-          attachments?: Array<{ name: string; text?: string }>;
+          attachments?: Array<{ name: string; type?: string; text?: string; data?: string }>;
         };
 
         if (!Array.isArray(body.messages) || body.messages.length === 0) {
           return json({ error: "A message is required." }, 400);
         }
 
-        const messages = body.messages.slice(-24).map((message) => ({
+        const messages: Array<{ role: string; content: any }> = body.messages.slice(-24).map((message) => ({
           role: message.role === "assistant" ? "assistant" : "user",
           content: String(message.content || "").slice(0, 30000),
         }));
