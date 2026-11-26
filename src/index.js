@@ -112,7 +112,7 @@ button{cursor:pointer}
   </section>
   <div id="messages" hidden></div>
   <div class="composerwrap">
-   <form class="composer" id="chatForm">
+   <form class="composer" id="chatForm" onsubmit="return false;">
     <textarea id="prompt" placeholder="Message Cold AI..." rows="1" required></textarea>
     <div class="composerbar">
      <button class="toolbtn" type="button" id="attach" title="Attach a text file">＋</button>
@@ -181,7 +181,7 @@ $('fileInput').onchange=async e=>{
 };
 promptBox.addEventListener('input',()=>{promptBox.style.height='auto';promptBox.style.height=Math.min(promptBox.scrollHeight,180)+'px';});
 promptBox.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('chatForm').requestSubmit();}});
-$('chatForm').onsubmit=async e=>{
+$('chatForm').addEventListener('submit',async e=>{
  e.preventDefault();const text=promptBox.value.trim();if(!text)return;
  welcome.hidden=true;messages.hidden=false;
  const userText=text+(attachments.length?'\n\nAttached files: '+attachments.map(f=>f.name).join(', '):'');
@@ -193,7 +193,7 @@ $('chatForm').onsubmit=async e=>{
   thinking.textContent=data.reply||'No response received.';current.push({role:'assistant',content:thinking.textContent});try{await saveCloudChat(userText,thinking.textContent);}catch(saveError){thinking.textContent+='\\n\\n(Note: this reply was generated, but cloud saving failed: '+saveError.message+')';}
  }catch(err){thinking.textContent='Error: '+err.message;}
  finally{$('send').disabled=false;attachments=[];$('fileInput').value='';$('modeHint').textContent=modeHints[mode];messages.scrollTop=messages.scrollHeight;}
-};
+});
 loadCloudChats();
 api('/api/session').then(()=>loadCloudChats()).catch(e=>console.warn('Session setup failed:',e.message));
 </script>
