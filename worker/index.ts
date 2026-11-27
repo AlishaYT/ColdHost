@@ -93,7 +93,7 @@ async function githubJson(token: string, path: string, init: RequestInit = {}): 
   const raw = await response.text();
   if (!response.ok) {
     console.error("GitHub builder API error:", response.status, raw.slice(0, 800));
-    throw new Error("GitHub builder request failed (" + response.status + "). Check the builder repository token permissions.");
+    throw new Error("GitHub API " + response.status + " at " + path + ": " + raw.slice(0, 500));
   }
   return raw ? JSON.parse(raw) : null;
 }
