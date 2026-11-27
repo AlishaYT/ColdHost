@@ -342,7 +342,7 @@ export default {
         aiAvailable: !!env.AI,
         jarBuilderAvailable: !!env.GITHUB_BUILD_TOKEN,
         model: MODEL,
-        version: "0.2.0",
+        version: "0.2.1",
       });
     }
 
