@@ -84,6 +84,7 @@ async function githubJson(token: string, path: string, init: RequestInit = {}): 
     ...init,
     headers: {
       Authorization: "Bearer " + token,
+      "User-Agent": "ColdAI-PluginBuilder/1.0",
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
       "Content-Type": "application/json",
@@ -389,6 +390,7 @@ async function downloadPluginJar(buildId: string, env: Env): Promise<Response> {
   const response = await fetch("https://api.github.com/repos/" + BUILDER_REPO + "/actions/artifacts/" + artifact.id + "/zip", {
     headers: {
       Authorization: "Bearer " + env.GITHUB_BUILD_TOKEN,
+      "User-Agent": "ColdAI-PluginBuilder/1.0",
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28",
     },
