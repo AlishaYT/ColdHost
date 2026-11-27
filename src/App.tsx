@@ -5,6 +5,7 @@ type Message = { id: string; role: "user" | "assistant"; content: string; downlo
 type Chat = { id: string; title: string; messages: Message[]; updatedAt: number };
 type Attachment = { id: string; name: string; type: string; text?: string; preview?: string };
 
+const API_BASE = "https://ai.coldmc.net";
 const STORE = "coldai_chats_v1";
 const MAX_FILES = 5;
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
@@ -64,7 +65,7 @@ export default function App() {
   useEffect(() => { localStorage.setItem(STORE, JSON.stringify(chats)); }, [chats]);
   useEffect(() => { if (activeId) localStorage.setItem("coldai_active_v1", activeId); else localStorage.removeItem("coldai_active_v1"); }, [activeId]);
   useEffect(() => {
-    fetch("/api/health").then(r => r.ok ? r.json() : Promise.reject())
+    fetch(API_BASE + "/api/health", { cache: "no-store" }).then(r => r.ok ? r.json() : Promise.reject())
       .then(data => setApiStatus(data.jarBuilderAvailable ? "AI + JAR builder ready" : "AI ready · JAR builder setup needed"))
       .catch(() => setApiStatus("AI unavailable"));
   }, []);
@@ -198,7 +199,7 @@ export default function App() {
     setDraft(""); setAttachments([]); setBusy(true); setError("");
 
     try {
-      const res = await fetch("/api/chat", {
+      const res = await fetch(API_BASE + "/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -252,7 +253,7 @@ export default function App() {
     setError("");
 
     try {
-      const start = await fetch("/api/plugin/build", {
+      const start = await fetch(API_BASE + "/api/plugin/build", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -273,14 +274,14 @@ export default function App() {
 
       for (let attempt = 0; attempt < 300; attempt++) {
         await wait(4000);
-        const statusResponse = await fetch("/api/plugin/status?id=" + encodeURIComponent(buildId), { cache: "no-store" });
+        const statusResponse = await fetch(API_BASE + "/api/plugin/status?id=" + encodeURIComponent(buildId), { cache: "no-store" });
         const status = await statusResponse.json().catch(() => ({}));
 
         if (!statusResponse.ok) throw new Error(status.error || "Could not read plugin build status.");
         if (status.status === "success") {
           updateMessage(chatId, assistantId, {
             content: "✅ " + String(started.pluginName || "Your plugin") + " is ready. Your compiled Minecraft plugin file is attached below.",
-            downloadUrl: String(status.downloadUrl || ""),
+            downloadUrl: status.downloadUrl ? new URL(String(status.downloadUrl), API_BASE).toString() : "",
             runUrl: String(status.runUrl || started.runUrl || ""),
           });
           return;
