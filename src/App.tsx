@@ -22,6 +22,19 @@ const uid = () => crypto.randomUUID();
 const titleFrom = (s: string) => s.trim().slice(0, 42) || "New chat";
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
+function isPluginBuildIntent(prompt: string): boolean {
+  const value = prompt.trim();
+  if (!value) return false;
+  if (/^(how do i|how can i|what is|explain|show me how|steps to|tutorial|why does|why is)\\b/i.test(value)) {
+    return false;
+  }
+  return (
+    /\\b(build|make|create|generate|develop)\\b.{0,65}\\b(minecraft\\s+|paper\\s+|spigot\\s+|bukkit\\s+)?plugin\\b/i.test(value) ||
+    /\\b(build|make|create|generate|compile|package)\\b.{0,50}\\b(jar|\\.jar)\\b/i.test(value) ||
+    /\\b(convert|turn)\\b.{0,35}\\b(plugin|java\\s+project)\\b.{0,20}\\b(jar|\\.jar)\\b/i.test(value)
+  );
+}
+
 function readAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -159,6 +172,10 @@ export default function App() {
   async function send() {
     const prompt = draft.trim();
     if ((!prompt && !attachments.length) || busy) return;
+    if (isPluginBuildIntent(prompt)) {
+      await buildJar();
+      return;
+    }
     const chatId = activeId || uid();
     let chat = chats.find(c => c.id === chatId);
     if (!chat) {
@@ -340,7 +357,7 @@ export default function App() {
           <div className="composer-tools">
             <div>
               <button type="button" className="tool-button" onClick={()=>fileRef.current?.click()} disabled={busy} title="Attach files" aria-label="Attach files"><Paperclip size={18}/></button>
-              <span className="hint">Attach or drop files · Enter to send</span>
+              <span className="hint">Attach/drop files · Plugin requests auto-build a JAR</span>
             </div>
             <div className="composer-actions">
               <button type="button" className="build-button" onClick={()=>void buildJar()} disabled={busy||(!draft.trim()&&!attachments.length)} title="Generate, compile and download a Minecraft plugin JAR"><Hammer size={15}/> Build JAR</button>
