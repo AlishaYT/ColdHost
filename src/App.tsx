@@ -271,7 +271,7 @@ export default function App() {
         runUrl: started.runUrl,
       });
 
-      for (let attempt = 0; attempt < 150; attempt++) {
+      for (let attempt = 0; attempt < 300; attempt++) {
         await wait(4000);
         const statusResponse = await fetch("/api/plugin/status?id=" + encodeURIComponent(buildId), { cache: "no-store" });
         const status = await statusResponse.json().catch(() => ({}));
