@@ -113,7 +113,7 @@ async function checkBuildRateLimit(request: Request, env: Env): Promise<boolean>
   ).bind(ipHash, hour).first<{ build_count: number }>();
 
   await env.DB.prepare("DELETE FROM coldai_build_rate_limits WHERE hour_window < ?").bind(hour - 24).run();
-  return (row?.build_count || 0) <= 2;
+  return (row?.build_count || 0) <= 5;
 }
 
 async function generatePluginProject(
@@ -268,7 +268,7 @@ async function createPluginBuild(request: Request, env: Env): Promise<Response> 
   }
 
   const allowed = await checkBuildRateLimit(request, env);
-  if (!allowed) return json({ error: "Build limit reached: maximum 2 plugin builds per hour from this connection. Please try again later." }, 429);
+  if (!allowed) return json({ error: "Build limit reached: maximum 5 plugin builds per hour from this connection. Please try again later." }, 429);
 
   const body = await request.json() as {
     prompt?: string;
