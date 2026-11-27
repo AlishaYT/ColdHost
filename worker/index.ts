@@ -99,23 +99,6 @@ async function githubJson(token: string, path: string, init: RequestInit = {}): 
   return raw ? JSON.parse(raw) : null;
 }
 
-async function checkBuildRateLimit(request: Request, env: Env): Promise<boolean> {
-  await env.DB.prepare(
-    "CREATE TABLE IF NOT EXISTS coldai_build_rate_limits (ip_hash TEXT NOT NULL, hour_window INTEGER NOT NULL, build_count INTEGER NOT NULL, PRIMARY KEY (ip_hash, hour_window))",
-  ).run();
-
-  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(ip));
-  const ipHash = Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
-  const hour = Math.floor(Date.now() / 3600000);
-
-  const row = await env.DB.prepare(
-    "INSERT INTO coldai_build_rate_limits (ip_hash, hour_window, build_count) VALUES (?, ?, 1) ON CONFLICT(ip_hash, hour_window) DO UPDATE SET build_count = build_count + 1 RETURNING build_count",
-  ).bind(ipHash, hour).first<{ build_count: number }>();
-
-  await env.DB.prepare("DELETE FROM coldai_build_rate_limits WHERE hour_window < ?").bind(hour - 24).run();
-  return (row?.build_count || 0) <= 5;
-}
 
 async function generatePluginProject(
   env: Env,
@@ -267,9 +250,6 @@ async function createPluginBuild(request: Request, env: Env): Promise<Response> 
       setupRequired: true,
     }, 503);
   }
-
-  const allowed = await checkBuildRateLimit(request, env);
-  if (!allowed) return json({ error: "Build limit reached: maximum 5 plugin builds per hour from this connection. Please try again later." }, 429);
 
   const body = await request.json() as {
     prompt?: string;
