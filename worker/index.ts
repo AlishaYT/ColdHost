@@ -16,10 +16,9 @@ Respond in the same language as the user, including Urdu, Hindi and Roman Urdu. 
 IMPORTANT CAPABILITY: This app includes a real automatic Minecraft plugin JAR build integration. The chat interface routes clear requests to create/build/generate a Minecraft/Paper/Spigot/Bukkit plugin, or to compile/package a JAR, into that build pipeline. The pipeline generates a Maven project, submits it to a private GitHub Actions runner, compiles it with Java 21 and Maven, and returns a real JAR download only when the build succeeds. Never claim that AI models are physically unable to compile, package, or provide JAR files, and never invent a security restriction against executable files. If the user asks how to build rather than requests a plugin, explain the steps. If the builder is not configured or a build fails, state the actual error rather than claiming success.
 If the user provides logs or code, analyze the supplied content and distinguish evidence from assumptions. For Minecraft development, ask for the server platform and version when compatibility depends on it. Provide complete files when requested, not misleading partial snippets.`;
 
-const PLUGIN_GENERATOR_SYSTEM = `You are Cold AI's Minecraft plugin project generator. Generate a COMPLETE, COMPILABLE Maven project for the exact plugin requested by the user.
-Use Java 21 and Maven. For Paper servers, use the Paper API from https://repo.papermc.io/repository/maven-public/ and an appropriate Paper API version. If the user's requested platform/version is not specified, default to Paper 1.21.4 with Java 21 and state that assumption in summary. Use the appropriate API and repository when the user specifies Spigot, Bukkit, or another supported Bukkit-compatible platform.
-Every project MUST include pom.xml, at least one complete Java source file under src/main/java/, and src/main/resources/plugin.yml with the correct main class, name, version, and api-version. Add all required supporting classes, configuration defaults, permissions and commands. Use real API methods, avoid placeholder methods, avoid missing imports, and make all classes compile together. Do not include precompiled binaries.
-Return ONLY valid JSON with this exact structure: {"pluginName":"ShortPluginName","summary":"One sentence describing the generated plugin and target platform","files":[{"path":"pom.xml","content":"complete file content"},{"path":"src/main/java/example/PluginMain.java","content":"complete Java file content"},{"path":"src/main/resources/plugin.yml","content":"complete YAML file content"}]}. No markdown fences, no explanation outside JSON. All file content must be plain strings with JSON escaping.`;
+const PLUGIN_PLANNER_SYSTEM = \`You are Cold AI's Minecraft plugin architect. Read the user's full plugin requirements and create a concise implementation plan for a COMPLETE, COMPILABLE Maven project. Use Java 21. Respect the exact server platform and version requested. For Paper, use the Paper Maven repository and the closest valid API version for the requested release. Plan all required Java classes, resources, configuration files and dependencies. Keep classes focused and reasonably small; split large features into multiple classes. Include pom.xml, src/main/resources/plugin.yml, at least one Java source file under src/main/java/, and README.md. Use no more than 40 files total. Every path must be unique and relative. Return ONLY valid JSON in this shape: {"pluginName":"ShortName","summary":"One sentence","files":[{"path":"pom.xml","purpose":"Maven project configuration and dependencies"},{"path":"src/main/resources/plugin.yml","purpose":"Plugin metadata, main class, commands and permissions"},{"path":"src/main/java/example/Main.java","purpose":"Main plugin class and lifecycle"}]}. Do not write file contents in this planning response. No markdown or commentary.\`;
+
+const PLUGIN_FILE_GENERATOR_SYSTEM = \`You are Cold AI's expert Minecraft plugin developer. Generate exactly ONE complete, production-quality project file at a time for the project described by the user and the supplied file manifest. Use Java 21 and the specified Minecraft platform/version. Keep every class consistent with the other planned files, package names, main class, commands, permissions, dependencies and configuration keys. Use real APIs and complete implementations, not pseudocode or placeholders. For pom.xml, include correct repositories/dependencies and Java 21 compiler configuration. For plugin.yml, use the exact main class and declare commands/permissions. For YAML, XML, Markdown and Java, output the complete raw file contents only: no JSON wrapper, no markdown fences, no explanations, no filename heading. Do not omit sections or truncate the file. Keep each individual file reasonably concise; move substantial logic into the other files listed in the manifest.\`;
 
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -117,6 +116,110 @@ async function checkBuildRateLimit(request: Request, env: Env): Promise<boolean>
   return (row?.build_count || 0) <= 2;
 }
 
+async function generatePluginProject(
+  env: Env,
+  userRequest: string,
+): Promise<{ pluginName: string; summary: string; files: Array<{ path: string; content: string }> }> {
+  const plannerResult = await env.AI.run(MODEL, {
+    messages: [
+      { role: "system", content: PLUGIN_PLANNER_SYSTEM },
+      { role: "user", content: "Create the file manifest for this plugin request:\n\n" + userRequest },
+    ],
+    max_completion_tokens: 2048,
+    chat_template_kwargs: { enable_thinking: false },
+  });
+
+  const plannerText = modelText(plannerResult);
+  if (!plannerText) throw new Error("The AI could not create a plugin file plan. Try a more specific request.");
+
+  const plan = jsonFromModel(plannerText);
+  if (!Array.isArray(plan.files) || plan.files.length < 1 || plan.files.length > 40) {
+    throw new Error("The AI file plan must contain between 1 and 40 files.");
+  }
+
+  const plannedFiles: Array<{ path: string; purpose: string }> = [];
+  const seen = new Set<string>();
+  for (const entry of plan.files) {
+    if (!entry || typeof entry.path !== "string" || typeof entry.purpose !== "string") {
+      throw new Error("The AI file plan contains an invalid file entry.");
+    }
+    const path = entry.path.replace(/\\/g, "/");
+    if (
+      path.startsWith("/") ||
+      path.split("/").some((part: string) => !part || part === "." || part === "..") ||
+      !(path === "pom.xml" || path === "README.md" || path.startsWith("src/"))
+    ) {
+      throw new Error("The AI file plan contains an unsafe or unsupported path: " + path);
+    }
+    if (seen.has(path)) throw new Error("The AI file plan contains a duplicate path: " + path);
+    seen.add(path);
+    plannedFiles.push({ path, purpose: entry.purpose.slice(0, 500) });
+  }
+
+  const requiredFiles = [
+    { path: "pom.xml", purpose: "Complete Maven configuration, repositories, dependencies and Java 21 compiler settings." },
+    { path: "src/main/resources/plugin.yml", purpose: "Complete Bukkit-compatible plugin metadata, exact main class, commands and permissions." },
+    { path: "README.md", purpose: "Installation, commands, permissions, configuration and usage documentation." },
+  ];
+  for (const required of requiredFiles) {
+    if (!seen.has(required.path)) {
+      if (plannedFiles.length >= 40) throw new Error("The file plan is full and omitted a required project file.");
+      plannedFiles.push(required);
+      seen.add(required.path);
+    }
+  }
+  if (!plannedFiles.some((file) => file.path.startsWith("src/main/java/") && file.path.endsWith(".java"))) {
+    throw new Error("The AI file plan is missing a Java main/source class.");
+  }
+
+  const manifest = JSON.stringify({
+    pluginName: String(plan.pluginName || "ColdAIPlugin"),
+    summary: String(plan.summary || "Minecraft plugin generated by Cold AI."),
+    files: plannedFiles,
+  });
+
+  const generatedFiles: Array<{ path: string; content: string }> = [];
+  let totalBytes = 0;
+  for (const file of plannedFiles) {
+    const result = await env.AI.run(MODEL, {
+      messages: [
+        { role: "system", content: PLUGIN_FILE_GENERATOR_SYSTEM },
+        {
+          role: "user",
+          content:
+            "PLUGIN REQUEST:\n" + userRequest +
+            "\n\nCOMPLETE PROJECT FILE MANIFEST:\n" + manifest +
+            "\n\nGenerate the complete raw contents for this exact file now:\nPATH: " + file.path +
+            "\nPURPOSE: " + file.purpose +
+            "\n\nOutput only the file contents. Do not output a code fence.",
+        },
+      ],
+      max_completion_tokens: 4096,
+      chat_template_kwargs: { enable_thinking: false },
+    });
+
+    let content = modelText(result);
+    content = content
+      .replace(/^\x60{3}[a-zA-Z0-9_-]*\s*\n?/, "")
+      .replace(/\n?\x60{3}\s*$/, "")
+      .trim();
+
+    if (!content) throw new Error("The AI returned an empty file: " + file.path);
+    const bytes = new TextEncoder().encode(content).length;
+    if (bytes > 50000) throw new Error("Generated file is too large: " + file.path);
+    totalBytes += bytes;
+    if (totalBytes > 250000) throw new Error("The generated plugin project exceeds the 250 KB project limit.");
+
+    generatedFiles.push({ path: file.path, content });
+  }
+
+  return validateProject({
+    pluginName: plan.pluginName,
+    summary: plan.summary,
+    files: generatedFiles,
+  });
+}
+
 function validateProject(project: any): { pluginName: string; summary: string; files: Array<{ path: string; content: string }> } {
   if (!project || !Array.isArray(project.files) || project.files.length < 3 || project.files.length > 40) {
     throw new Error("The generated project must contain between 3 and 40 files.");
@@ -181,23 +284,14 @@ async function createPluginBuild(request: Request, env: Env): Promise<Response> 
 
   if (!prompt && !attachmentContext) return json({ error: "Describe the Minecraft plugin you want to build, or attach project source files." }, 400);
 
-  const generated = await env.AI.run(MODEL, {
-    messages: [
-      { role: "system", content: PLUGIN_GENERATOR_SYSTEM },
-      { role: "user", content: "Plugin request:\n" + (prompt || "Build a plugin from the attached project files.") + attachmentContext },
-    ],
-    max_completion_tokens: 8192,
-    chat_template_kwargs: { enable_thinking: false },
-  });
-
-  const raw = modelText(generated);
-  if (!raw) return json({ error: "The AI could not generate the Maven project. Try a smaller or more specific plugin request." }, 502);
+  const userRequest =
+    "Plugin request:\n" + (prompt || "Build a plugin from the attached project files.") + attachmentContext;
 
   let project: ReturnType<typeof validateProject>;
   try {
-    project = validateProject(jsonFromModel(raw));
+    project = await generatePluginProject(env, userRequest);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Invalid generated project.";
+    const message = error instanceof Error ? error.message : "Unknown project generation error.";
     console.error("Plugin project generation error:", message);
     return json({ error: "Plugin project generation failed: " + message }, 502);
   }
@@ -342,7 +436,7 @@ export default {
         aiAvailable: !!env.AI,
         jarBuilderAvailable: !!env.GITHUB_BUILD_TOKEN,
         model: MODEL,
-        version: "0.2.1",
+        version: "0.2.2",
       });
     }
 
