@@ -25,13 +25,13 @@ const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 function isPluginBuildIntent(prompt: string): boolean {
   const value = prompt.trim();
   if (!value) return false;
-  if (/^(how do i|how can i|what is|explain|show me how|steps to|tutorial|why does|why is)\\b/i.test(value)) {
+  if (/^(how do i|how can i|what is|explain|show me how|steps to|tutorial|why does|why is)\b/i.test(value)) {
     return false;
   }
   return (
-    /\\b(build|make|create|generate|develop)\\b.{0,65}\\b(minecraft\\s+|paper\\s+|spigot\\s+|bukkit\\s+)?plugin\\b/i.test(value) ||
-    /\\b(build|make|create|generate|compile|package)\\b.{0,50}\\b(jar|\\.jar)\\b/i.test(value) ||
-    /\\b(convert|turn)\\b.{0,35}\\b(plugin|java\\s+project)\\b.{0,20}\\b(jar|\\.jar)\\b/i.test(value)
+    /\b(build|make|create|generate|develop)\b.{0,65}\b(minecraft\s+|paper\s+|spigot\s+|bukkit\s+)?plugin\b/i.test(value) ||
+    /\b(build|make|create|generate|compile|package)\b.{0,50}\b(jar|\.jar)\b/i.test(value) ||
+    /\b(convert|turn)\b.{0,35}\b(plugin|java\s+project)\b.{0,20}\b(jar|\.jar)\b/i.test(value)
   );
 }
 
@@ -279,7 +279,7 @@ export default function App() {
         if (!statusResponse.ok) throw new Error(status.error || "Could not read plugin build status.");
         if (status.status === "success") {
           updateMessage(chatId, assistantId, {
-            content: "✅ **Build successful!**\n" + String(started.pluginName || "Your plugin") + " compiled into a real Minecraft .jar file.\n\n" + String(started.summary || ""),
+            content: "✅ " + String(started.pluginName || "Your plugin") + " is ready. Your compiled Minecraft plugin file is attached below.",
             downloadUrl: String(status.downloadUrl || ""),
             runUrl: String(status.runUrl || started.runUrl || ""),
           });
