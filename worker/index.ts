@@ -304,27 +304,36 @@ async function createPluginBuild(request: Request, env: Env): Promise<Response> 
   const baseSha = base?.object?.sha;
   if (!baseSha) throw new Error("Could not read the private builder repository's main branch.");
 
-  await githubJson(token, "/git/refs", {
-    method: "POST",
-    body: JSON.stringify({ ref: "refs/heads/" + branch, sha: baseSha }),
-  });
-
-  for (const file of project.files) {
-    const path = file.path.split("/").map(encodeURIComponent).join("/");
-    await githubJson(token, "/contents/" + path, {
-      method: "PUT",
-      body: JSON.stringify({
-        message: "Cold AI generated plugin project " + buildId,
-        content: toBase64Utf8(file.content),
-        branch,
-      }),
+  try {
+    await githubJson(token, "/git/refs", {
+      method: "POST",
+      body: JSON.stringify({ ref: "refs/heads/" + branch, sha: baseSha }),
     });
-  }
 
-  await githubJson(token, "/actions/workflows/build-plugin.yml/dispatches", {
-    method: "POST",
-    body: JSON.stringify({ ref: branch, inputs: { build_id: buildId } }),
-  });
+    for (const file of project.files) {
+      const path = file.path.split("/").map(encodeURIComponent).join("/");
+      await githubJson(token, "/contents/" + path, {
+        method: "PUT",
+        body: JSON.stringify({
+          message: "Cold AI generated plugin project " + buildId,
+          content: toBase64Utf8(file.content),
+          branch,
+        }),
+      });
+    }
+
+    await githubJson(token, "/actions/workflows/build-plugin.yml/dispatches", {
+      method: "POST",
+      body: JSON.stringify({ ref: branch, inputs: { build_id: buildId } }),
+    });
+  } catch (error) {
+    try {
+      await githubJson(token, "/git/refs/heads/" + branch, { method: "DELETE" });
+    } catch (cleanupError) {
+      console.warn("Could not remove failed temporary build branch:", cleanupError);
+    }
+    throw error;
+  }
 
   return json({
     ok: true,
